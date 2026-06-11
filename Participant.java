@@ -3,10 +3,16 @@ public class Participant {
     private final ParticipantBehavior behavior;
     private State state;
 
-    public Participant(String name, ParticipantBehavior behavior) {
+    private ProtocolType protocolType;
+    private final String logFile;
+
+    public Participant(String name, ParticipantBehavior behavior, ProtocolType protocolType) {
         this.name = name;
         this.behavior = behavior;
         this.state = State.INITIAL;
+
+        this.logFile = name.replace(" ", "_") + ".log";
+        this.protocolType = protocolType;
     }
 
     public Vote prepare(String transactionId) {
@@ -17,10 +23,12 @@ public class Participant {
         switch (vote) {
             case YES:
                 state = State.READY;
+                persist(transactionId, "READY");
                 log("gravou estado READY no log local e respondeu YES.");
                 break;
             case NO:
                 state = State.ABORTED;
+                persist(transactionId, "VOTE_ABORT");
                 log("nao conseguiu preparar a transacao, respondeu NO e abortou localmente.");
                 break;
             case READ_ONLY:
@@ -51,12 +59,14 @@ public class Participant {
 
         if (decision == State.COMMITTED) {
             state = State.COMMITTED;
+            persist(transactionId, "GLOBAL_COMMIT");
             log("recebeu COMMIT da transacao " + transactionId + " e confirmou as alteracoes.");
             return;
         }
 
         if (decision == State.ABORTED) {
             state = State.ABORTED;
+            persist(transactionId, "GLOBAL_ABORT");
             log("recebeu ABORT da transacao " + transactionId + " e desfez/descartou alteracoes.");
             return;
         }
@@ -82,6 +92,31 @@ public class Participant {
 
     public State getState() {
         return state;
+    }
+
+    private void persist(String transactionId, String event) {
+        TransactionLogger.write(
+                logFile,
+                transactionId + " " + event
+        );
+    }
+
+    public void recover(String transactionId) {
+
+        log("iniciando recuperacao da transacao "
+                + transactionId + ".");
+
+        State recoveredState =
+                RecoveryManager.recover(
+                        transactionId,
+                        "Coordenador.log",
+                        protocolType
+                );
+
+        state = recoveredState;
+
+        log("estado apos recuperacao: "
+                + recoveredState.getDescription());
     }
 
     private void log(String message) {
