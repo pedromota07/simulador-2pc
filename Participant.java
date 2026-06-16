@@ -3,7 +3,7 @@ public class Participant {
     private final ParticipantBehavior behavior;
     private State state;
 
-    private ProtocolType protocolType;
+    private final ProtocolType protocolType;
     private final String logFile;
 
     public Participant(String name, ParticipantBehavior behavior, ProtocolType protocolType) {
@@ -24,20 +24,20 @@ public class Participant {
             case YES:
                 state = State.READY;
                 persist(transactionId, "READY");
-                log("gravou estado READY no log local e respondeu YES.");
+                log("gravou READY no log local e respondeu YES.");
                 break;
             case NO:
                 state = State.ABORTED;
                 persist(transactionId, "VOTE_ABORT");
-                log("nao conseguiu preparar a transacao, respondeu NO e abortou localmente.");
+                log("respondeu NO e abortou localmente.");
                 break;
             case READ_ONLY:
                 state = State.READ_ONLY;
-                log("nao possui alteracoes, respondeu READ_ONLY e encerrou sua participacao.");
+                log("respondeu READ_ONLY e encerrou sua participacao; nao entrara na fase de decisao.");
                 break;
             case TIMEOUT:
                 state = State.TIMEOUT;
-                log("nao respondeu dentro do tempo limite. Coordenador interpreta como TIMEOUT.");
+                log("nao respondeu dentro do tempo limite.");
                 break;
             default:
                 throw new IllegalStateException("Voto desconhecido: " + vote);
@@ -47,31 +47,47 @@ public class Participant {
     }
 
     public void receiveDecision(String transactionId, State decision) {
+        receiveDecision(transactionId, decision, false);
+    }
+
+    public boolean receiveDecision(String transactionId, State decision, boolean ackRequired) {
         if (state == State.READ_ONLY) {
-            log("recebeu decisao " + decision + ", mas ja estava READ_ONLY e nao precisa aplicar nada.");
-            return;
+            log("ignora " + decision + " porque ja encerrou como READ_ONLY.");
+            return false;
         }
 
         if (state == State.TIMEOUT) {
-            log("nao recebeu a decisao " + decision + " porque estava indisponivel.");
-            return;
+            log("nao recebeu " + decision + " porque estava indisponivel.");
+            return false;
         }
 
         if (decision == State.COMMITTED) {
             state = State.COMMITTED;
-            persist(transactionId, "GLOBAL_COMMIT");
-            log("recebeu COMMIT da transacao " + transactionId + " e confirmou as alteracoes.");
-            return;
+            persist(transactionId, "COMMIT");
+            if (ackRequired) {
+                log("gravou COMMIT no log, confirmou as alteracoes e enviou ACK.");
+                return true;
+            }
+
+            log("confirmou as alteracoes; ACK de COMMIT dispensado por "
+                    + protocolType.getDescription() + ".");
+            return false;
         }
 
         if (decision == State.ABORTED) {
             state = State.ABORTED;
-            persist(transactionId, "GLOBAL_ABORT");
-            log("recebeu ABORT da transacao " + transactionId + " e desfez/descartou alteracoes.");
-            return;
+            if (ackRequired) {
+                persist(transactionId, "ABORT");
+                log("gravou ABORT no log, descartou as alteracoes e enviou ACK.");
+                return true;
+            }
+
+            log("recebeu ABORT, descartou as alteracoes e esqueceu a transacao sem ACK.");
+            return false;
         }
 
         log("recebeu decisao inesperada: " + decision + ".");
+        return false;
     }
 
     public void blockWaitingForCoordinator(String transactionId) {
@@ -84,6 +100,21 @@ public class Participant {
         } else {
             log("nao ficou bloqueado porque seu estado atual e " + state.getDescription() + ".");
         }
+    }
+
+    public void recover(String transactionId) {
+        log("consultando o coordenador para recuperar a transacao " + transactionId + ".");
+
+        State recoveredState =
+                RecoveryManager.recover(
+                        transactionId,
+                        "Coordenador.log",
+                        protocolType
+                );
+
+        state = recoveredState;
+
+        log("estado apos consulta: " + ConsoleColors.state(recoveredState) + ".");
     }
 
     public String getName() {
@@ -101,25 +132,7 @@ public class Participant {
         );
     }
 
-    public void recover(String transactionId) {
-
-        log("iniciando recuperacao da transacao "
-                + transactionId + ".");
-
-        State recoveredState =
-                RecoveryManager.recover(
-                        transactionId,
-                        "Coordenador.log",
-                        protocolType
-                );
-
-        state = recoveredState;
-
-        log("estado apos recuperacao: "
-                + recoveredState.getDescription());
-    }
-
     private void log(String message) {
-        System.out.println("[" + name + "] " + message);
+        System.out.println(ConsoleColors.actor(name) + " " + message);
     }
 }
