@@ -1,5 +1,8 @@
 public enum CoordinatorFailurePoint {
     NONE,
     BEFORE_GLOBAL_COMMIT,
-    AFTER_GLOBAL_COMMIT
+    AFTER_GLOBAL_COMMIT,
+    BEFORE_PRE_COMMIT,
+    AFTER_PRE_COMMIT,
+    BEFORE_DO_COMMIT
 }

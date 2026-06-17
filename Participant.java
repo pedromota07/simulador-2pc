@@ -50,6 +50,34 @@ public class Participant {
         receiveDecision(transactionId, decision, false);
     }
 
+    public boolean receivePreCommit(String transactionId) {
+        if (state == State.READ_ONLY) {
+            log("ignora PRE_COMMIT porque ja encerrou como READ_ONLY.");
+            return false;
+        }
+
+        if (state == State.TIMEOUT) {
+            log("nao recebeu PRE_COMMIT porque estava indisponivel.");
+            return false;
+        }
+
+        if (state == State.PRE_COMMITTED) {
+            log("ja estava PRE_COMMITTED e reenviou ACK de PRE_COMMIT.");
+            return true;
+        }
+
+        if (state == State.READY) {
+            state = State.PRE_COMMITTED;
+            persist(transactionId, "PRE_COMMIT");
+            log("gravou PRE_COMMIT no log local e enviou ACK.");
+            return true;
+        }
+
+        log("nao pode aplicar PRE_COMMIT porque seu estado atual e "
+                + state.getDescription() + ".");
+        return false;
+    }
+
     public boolean receiveDecision(String transactionId, State decision, boolean ackRequired) {
         if (state == State.READ_ONLY) {
             log("ignora " + decision + " porque ja encerrou como READ_ONLY.");
@@ -62,14 +90,17 @@ public class Participant {
         }
 
         if (decision == State.COMMITTED) {
+            String commitMessage = protocolType == ProtocolType.THREE_PC ? "DO_COMMIT" : "COMMIT";
             state = State.COMMITTED;
             persist(transactionId, "COMMIT");
             if (ackRequired) {
-                log("gravou COMMIT no log, confirmou as alteracoes e enviou ACK.");
+                log("recebeu " + commitMessage
+                        + ", gravou COMMIT no log, confirmou as alteracoes e enviou ACK.");
                 return true;
             }
 
-            log("confirmou as alteracoes; ACK de COMMIT dispensado por "
+            log("recebeu " + commitMessage
+                    + " e confirmou as alteracoes; ACK dispensado por "
                     + protocolType.getDescription() + ".");
             return false;
         }
@@ -103,18 +134,18 @@ public class Participant {
     }
 
     public void recover(String transactionId) {
-        log("consultando o coordenador para recuperar a transacao " + transactionId + ".");
+        log("iniciando recuperacao local da transacao " + transactionId + ".");
 
         State recoveredState =
-                RecoveryManager.recover(
+                RecoveryManager.recoverParticipant(
                         transactionId,
-                        "Coordenador.log",
+                        logFile,
                         protocolType
                 );
 
         state = recoveredState;
 
-        log("estado apos consulta: " + ConsoleColors.state(recoveredState) + ".");
+        log("estado apos recuperacao local: " + ConsoleColors.state(recoveredState) + ".");
     }
 
     public String getName() {

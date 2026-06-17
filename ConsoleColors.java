@@ -46,6 +46,8 @@ public class ConsoleColors {
                 return red(state.getDescription());
             case BLOCKED:
             case TIMEOUT:
+            case PRE_COMMITTING:
+            case PRE_COMMITTED:
                 return yellow(state.getDescription());
             case READ_ONLY:
                 return cyan(state.getDescription());

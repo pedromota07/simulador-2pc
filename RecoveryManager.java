@@ -11,13 +11,29 @@ public class RecoveryManager {
             String logFile,
             ProtocolType protocolType
     ) {
+        return recoverCoordinator(transactionId, logFile, protocolType);
+    }
+
+    public static State recoverCoordinator(
+            String transactionId,
+            String logFile,
+            ProtocolType protocolType
+    ) {
         List<String> events = readEvents(transactionId, logFile);
 
         if (events.contains("GLOBAL_COMMIT")) {
             return State.COMMITTED;
         }
 
-        if (events.contains("GLOBAL_ABORT") || events.contains("VOTE_ABORT")) {
+        if (events.contains("GLOBAL_ABORT")) {
+            return State.ABORTED;
+        }
+
+        if (protocolType == ProtocolType.THREE_PC) {
+            if (events.contains("PRE_COMMIT")) {
+                return State.COMMITTED;
+            }
+
             return State.ABORTED;
         }
 
@@ -27,6 +43,40 @@ public class RecoveryManager {
 
         if (protocolType == ProtocolType.PRESUMED_COMMIT && events.contains("COMMIT_INIT")) {
             return State.ABORTED;
+        }
+
+        return applyProtocolRule(protocolType);
+    }
+
+    public static State recoverParticipant(
+            String transactionId,
+            String logFile,
+            ProtocolType protocolType
+    ) {
+        List<String> events = readEvents(transactionId, logFile);
+
+        if (events.contains("COMMIT")) {
+            return State.COMMITTED;
+        }
+
+        if (events.contains("ABORT") || events.contains("VOTE_ABORT")) {
+            return State.ABORTED;
+        }
+
+        if (protocolType == ProtocolType.THREE_PC) {
+            if (events.contains("PRE_COMMIT")) {
+                return State.PRE_COMMITTED;
+            }
+
+            if (events.contains("READY")) {
+                return State.ABORTED;
+            }
+
+            return State.ABORTED;
+        }
+
+        if (events.contains("READY")) {
+            return applyProtocolRule(protocolType);
         }
 
         return applyProtocolRule(protocolType);
@@ -59,6 +109,8 @@ public class RecoveryManager {
                 return State.ABORTED;
             case PRESUMED_COMMIT:
                 return State.COMMITTED;
+            case THREE_PC:
+                return State.ABORTED;
             case TWO_PC:
             default:
                 return State.BLOCKED;
@@ -73,6 +125,8 @@ public class RecoveryManager {
                 return State.ABORTED;
             case PRESUMED_COMMIT:
                 return State.COMMITTED;
+            case THREE_PC:
+                return State.ABORTED;
             case TWO_PC:
             default:
                 return State.BLOCKED;
